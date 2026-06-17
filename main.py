@@ -1,3 +1,5 @@
+import csv
+import io
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -214,6 +216,79 @@ def build_confirmation_summary(action: ParsedAction, prior_state: dict | None = 
         )
 
     return "Unknown action. React ✅ to confirm or ❌ to cancel."
+
+
+# ── CSV export (tax/accounting) ───────────────────────────────────────────────
+
+def _build_sales_csv(rows: list[dict]) -> str:
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["ID", "Item", "Category", "Size", "Purchase Date", "Cost Basis",
+                "Sale Date", "Proceeds", "Shipping", "Profit"])
+    t_cost = t_proceeds = t_ship = t_profit = 0.0
+    for r in rows:
+        cost = r["purchase_price"] or 0.0
+        proceeds = r["sale_price"] or 0.0
+        ship = r["shipping_cost"] or 0.0
+        profit = proceeds - cost - ship
+        t_cost += cost; t_proceeds += proceeds; t_ship += ship; t_profit += profit
+        w.writerow([
+            r["id"], r["item_name"], r["category"], r["size"] or "",
+            fmt_date(r["purchase_date"]) if r["purchase_date"] else "",
+            f"{cost:.2f}",
+            fmt_date(r["sale_date"]) if r["sale_date"] else "",
+            f"{proceeds:.2f}", f"{ship:.2f}", f"{profit:.2f}",
+        ])
+    w.writerow([])
+    w.writerow(["", "TOTALS", "", "", "", f"{t_cost:.2f}", "",
+                f"{t_proceeds:.2f}", f"{t_ship:.2f}", f"{t_profit:.2f}"])
+    return buf.getvalue()
+
+
+def _build_expenses_csv(rows: list[dict]) -> str:
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["ID", "Date", "Category", "Amount", "Description"])
+    total = 0.0
+    for r in rows:
+        amt = r["amount"] or 0.0
+        total += amt
+        w.writerow([
+            r["id"], fmt_date(r["date"]) if r["date"] else "",
+            r["category"] or "", f"{amt:.2f}", r["description"] or "",
+        ])
+    w.writerow([])
+    w.writerow(["", "", "TOTAL", f"{total:.2f}", ""])
+    return buf.getvalue()
+
+
+async def handle_export(message: "discord.Message", filters: dict):
+    year = filters.get("year")
+    sales = db.get_sales_for_export(year=year)
+    expenses = db.get_expenses_for_export(year=year)
+    scope = f" for {year}" if year else ""
+
+    if not sales and not expenses:
+        await message.reply(f"Nothing to export{scope} yet.")
+        return
+
+    label = str(year) if year else "all"
+    files = []
+    if sales:
+        files.append(discord.File(
+            io.BytesIO(_build_sales_csv(sales).encode("utf-8")), filename=f"sales_{label}.csv"))
+    if expenses:
+        files.append(discord.File(
+            io.BytesIO(_build_expenses_csv(expenses).encode("utf-8")), filename=f"expenses_{label}.csv"))
+
+    net = sum((r["sale_price"] or 0) - (r["purchase_price"] or 0) - (r["shipping_cost"] or 0) for r in sales)
+    exp_total = sum(r["amount"] or 0 for r in expenses)
+    await message.reply(
+        f"📄 Export{scope}: {len(sales)} sales, {len(expenses)} expenses.\n"
+        f"Gross profit on sales: {fmt_price(net)} | Expenses: {fmt_price(exp_total)} | "
+        f"Net: {fmt_price(net - exp_total)}",
+        files=files,
+    )
 
 
 def format_query_results(action: Query) -> str:
@@ -501,6 +576,9 @@ async def on_message(message: discord.Message):
         return
 
     if isinstance(action, Query):
+        if action.query_type == "export":
+            await handle_export(message, action.filters)
+            return
         result = format_query_results(action)
         bot_msg = await message.reply(result)
         await bot_msg.add_reaction(config.CONFIRM_EMOJI)

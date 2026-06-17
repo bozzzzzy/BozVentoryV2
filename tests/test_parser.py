@@ -248,6 +248,21 @@ def test_parse_batch_buy_then_sell_same_item():
     assert isinstance(result, Batch)
 
 
+def test_parse_export_query_with_year():
+    from parser import Query
+    result = _call_parse({"action": "query", "query_type": "export", "filters": {"year": 2026}})
+    assert isinstance(result, Query)
+    assert result.query_type == "export"
+    assert result.filters.get("year") == 2026
+
+
+def test_parse_export_query_no_year():
+    from parser import Query
+    result = _call_parse({"action": "query", "query_type": "export", "filters": {}})
+    assert isinstance(result, Query)
+    assert result.query_type == "export"
+
+
 def test_parse_find_query_text():
     from parser import Query
     result = _call_parse({"action": "query", "query_type": "find", "filters": {"text": "charizard"}})

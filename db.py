@@ -457,6 +457,40 @@ def get_recent_items(limit: int = 10) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def _year_clause(year, date_col: str) -> tuple[str, list]:
+    """Return (SQL fragment, params) restricting date_col to a calendar year."""
+    if not year:
+        return "", []
+    return f" AND {date_col} >= ? AND {date_col} <= ?", [f"{int(year)}-01-01", f"{int(year)}-12-31"]
+
+
+def get_sales_for_export(year=None) -> list[dict]:
+    """Sold units (taxable events) for the given calendar year, or all if year is None."""
+    year_sql, params = _year_clause(year, "sale_date")
+    with get_conn() as conn:
+        rows = conn.execute(f"""
+            SELECT id, category, item_name, size, purchase_date, purchase_price,
+                   sale_date, sale_price, shipping_cost
+              FROM inventory
+             WHERE status = 'sold' AND deleted_at IS NULL {year_sql}
+             ORDER BY sale_date, id
+        """, params).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_expenses_for_export(year=None) -> list[dict]:
+    """Expenses for the given calendar year, or all if year is None."""
+    year_sql, params = _year_clause(year, "date")
+    with get_conn() as conn:
+        rows = conn.execute(f"""
+            SELECT id, date, category, amount, description
+              FROM expenses
+             WHERE deleted_at IS NULL {year_sql}
+             ORDER BY date, id
+        """, params).fetchall()
+    return [dict(r) for r in rows]
+
+
 def get_all_inventory_for_sync() -> list[list]:
     with get_conn() as conn:
         rows = conn.execute("""

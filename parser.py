@@ -83,10 +83,14 @@ You must return exactly one of these JSON shapes (see "action" field):
    {{ "action": "undo" }}
 
 8. query — user is asking a read-only question
-   {{ "action": "query", "query_type": "find" | "items" | "stale" | "unsold" | "recent" | "by_category" | "expenses_sum" | "profit" | "velocity" | "leaderboard" | "cashflow",
+   {{ "action": "query", "query_type": "export" | "find" | "items" | "stale" | "unsold" | "recent" | "by_category" | "expenses_sum" | "profit" | "velocity" | "leaderboard" | "cashflow",
      "filters": {{ ... }} }}
 
    Filter keys by query_type:
+   - "export"       : "year" (4-digit int, optional). Generates downloadable CSV files of sales
+                      and expenses for taxes. Use for "export my data", "export for taxes",
+                      "download my sales", "give me a CSV". "export 2026" / "2026 taxes" -> year=2026.
+                      If no year is mentioned, omit it (exports everything).
    - "find"         : "text" (search term / item name, optional), "category" (optional),
                       "size" (optional), "min_price" (number, optional), "max_price" (number, optional).
                       Use this to LOOK UP or SEARCH for specific items, or to filter by attributes —
@@ -208,7 +212,7 @@ class UndoLast(BaseModel):
 class Query(BaseModel):
     model_config = ConfigDict(extra="forbid")
     action: Literal["query"]
-    query_type: Literal["find", "items", "stale", "unsold", "recent", "by_category", "expenses_sum", "profit", "velocity", "leaderboard", "cashflow"]
+    query_type: Literal["export", "find", "items", "stale", "unsold", "recent", "by_category", "expenses_sum", "profit", "velocity", "leaderboard", "cashflow"]
     filters: dict = {}
 
 

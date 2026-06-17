@@ -297,6 +297,32 @@ def test_batch_confirmation_summary():
     assert "2. Expense $10.00" in summary
 
 
+def test_build_sales_csv_has_headers_and_totals():
+    from main import _build_sales_csv
+    rows = [
+        {"id": 1, "item_name": "Charizard", "category": "cards", "size": None,
+         "purchase_date": "2026-03-01", "purchase_price": 10.0,
+         "sale_date": "2026-04-10", "sale_price": 40.0, "shipping_cost": 5.0},
+    ]
+    csv_text = _build_sales_csv(rows)
+    assert "Cost Basis" in csv_text and "Proceeds" in csv_text and "Profit" in csv_text
+    assert "Charizard" in csv_text
+    assert "25.00" in csv_text   # profit = 40 - 10 - 5
+    assert "TOTALS" in csv_text
+
+
+def test_build_expenses_csv_has_total():
+    from main import _build_expenses_csv
+    rows = [
+        {"id": 1, "date": "2026-02-01", "category": "supplies",
+         "amount": 22.0, "description": "sleeves"},
+    ]
+    csv_text = _build_expenses_csv(rows)
+    assert "sleeves" in csv_text
+    assert "TOTAL" in csv_text
+    assert "22.00" in csv_text
+
+
 def test_sell_confirmation_shows_shipping():
     from main import build_confirmation_summary
     from parser import SellItems

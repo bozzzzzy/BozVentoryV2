@@ -455,6 +455,35 @@ def test_get_active_inventory_summary(db_mod):
     assert "Pack A" in names and "Pack B" in names
 
 
+def test_get_sales_for_export_year_filter(db_mod):
+    from parser import SellItems
+    _add_items(db_mod, "OldCard", 1, 5.0)
+    _add_items(db_mod, "NewCard", 1, 5.0)
+    db_mod.commit_action(SellItems(action="sell", item_name="OldCard", quantity=1,
+                                   total_price=20.0, sale_date="2025-06-01"))
+    db_mod.commit_action(SellItems(action="sell", item_name="NewCard", quantity=1,
+                                   total_price=30.0, sale_date="2026-06-01"))
+    rows_2026 = db_mod.get_sales_for_export(year=2026)
+    assert len(rows_2026) == 1
+    assert rows_2026[0]["item_name"] == "NewCard"
+    assert len(db_mod.get_sales_for_export()) == 2  # no year = all
+
+
+def test_get_sales_for_export_excludes_active(db_mod):
+    _add_items(db_mod, "Unsold", 1, 5.0)
+    assert db_mod.get_sales_for_export() == []
+
+
+def test_get_expenses_for_export_year_filter(db_mod):
+    from parser import AddExpense
+    db_mod.commit_action(AddExpense(action="expense", amount=10.0, description="a",
+                                    category=None, date="2025-01-01"))
+    db_mod.commit_action(AddExpense(action="expense", amount=20.0, description="b",
+                                    category=None, date="2026-01-01"))
+    assert len(db_mod.get_expenses_for_export(year=2026)) == 1
+    assert len(db_mod.get_expenses_for_export()) == 2
+
+
 def test_get_active_inventory_summary_category_filter(db_mod):
     _add_items(db_mod, "Pikachu", 1, 5.00, category="cards")
     _add_items(db_mod, "Air Force 1", 2, 90.00, category="sneakers")
