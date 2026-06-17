@@ -184,6 +184,70 @@ def test_parse_add_returns_add_inventory():
     assert result.item_name == "Pack"
 
 
+def test_parse_sell_with_shipping():
+    from parser import SellItems
+    result = _call_parse(
+        {"action": "sell", "item_name": "Prismatic Bundle", "quantity": 1,
+         "total_price": 55.0, "sale_date": "2026-06-08", "shipping_cost": 6.5},
+        active_inv=ACTIVE_INV,
+    )
+    assert isinstance(result, SellItems)
+    assert result.shipping_cost == 6.5
+
+
+def test_parse_sell_shipping_defaults_zero():
+    from parser import SellItems
+    result = _call_parse(
+        {"action": "sell", "item_name": "Prismatic Bundle", "quantity": 1,
+         "total_price": 55.0, "sale_date": "2026-06-08"},
+        active_inv=ACTIVE_INV,
+    )
+    assert result.shipping_cost == 0.0
+
+
+def test_parse_batch_returns_batch():
+    from parser import Batch
+    result = _call_parse({"action": "batch", "actions": [
+        {"action": "add", "category": "cards", "item_name": "Pack",
+         "unit_price": 5.0, "purchase_date": "2026-01-01", "quantity": 1},
+        {"action": "expense", "amount": 10.0, "description": "shipping",
+         "category": None, "date": "2026-01-01"},
+    ]})
+    assert isinstance(result, Batch)
+    assert len(result.actions) == 2
+
+
+def test_parse_batch_single_collapses():
+    from parser import AddInventory
+    result = _call_parse({"action": "batch", "actions": [
+        {"action": "add", "category": "cards", "item_name": "Pack",
+         "unit_price": 5.0, "purchase_date": "2026-01-01", "quantity": 1},
+    ]})
+    assert isinstance(result, AddInventory)
+
+
+def test_parse_batch_rejects_non_logging_action():
+    from parser import NeedsClarification
+    result = _call_parse({"action": "batch", "actions": [
+        {"action": "add", "category": "cards", "item_name": "Pack",
+         "unit_price": 5.0, "purchase_date": "2026-01-01", "quantity": 1},
+        {"action": "delete", "target": 1, "table": "inventory"},
+    ]})
+    assert isinstance(result, NeedsClarification)
+
+
+def test_parse_batch_buy_then_sell_same_item():
+    from parser import Batch
+    # Selling an item that is being added in the same batch should be allowed.
+    result = _call_parse({"action": "batch", "actions": [
+        {"action": "add", "category": "cards", "item_name": "Fresh Card",
+         "unit_price": 5.0, "purchase_date": "2026-01-01", "quantity": 2},
+        {"action": "sell", "item_name": "Fresh Card", "quantity": 1,
+         "total_price": 20.0, "sale_date": "2026-01-02"},
+    ]}, active_inv=[])
+    assert isinstance(result, Batch)
+
+
 def test_parse_find_query_text():
     from parser import Query
     result = _call_parse({"action": "query", "query_type": "find", "filters": {"text": "charizard"}})

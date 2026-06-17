@@ -43,9 +43,11 @@ You must return exactly one of these JSON shapes (see "action" field):
 
 2. sell — user is recording a sale
    {{ "action": "sell", "item_name": "...", "quantity": 1, "total_price": 0.0,
-     "sale_date": "YYYY-MM-DD" }}
+     "sale_date": "YYYY-MM-DD", "shipping_cost": 0.0 }}
    - total_price is always the TOTAL across all units, not per-unit.
      If user says "$X each", total_price = X * quantity.
+   - shipping_cost: TOTAL shipping the seller paid for this sale, across all units.
+     Default 0.0 if not mentioned. E.g. "sold 2 for $50, $8 shipping" -> shipping_cost=8.0.
    - item_name: MUST match an entry in the active inventory list above (canonical casing).
      If no clear match, return a "clarify" action.
 
@@ -114,6 +116,15 @@ You must return exactly one of these JSON shapes (see "action" field):
      CORRECT: "Which item did you mean?"  WRONG: "User wants to sell an item but..."
    - Never narrate about "the user" in the third person, and never describe your own reasoning.
 
+10. batch — the user describes MORE THAN ONE logging action in a single message
+   {{ "action": "batch", "actions": [ <action obj>, <action obj>, ... ] }}
+   - Use this when the message contains multiple buys/sells/rips/expenses, e.g.
+     "bought 3 boxes for $400 and sold 2 Air Max for $300 with $10 shipping".
+   - Each element of "actions" MUST be a complete "add", "sell", "rip", or "expense" object
+     exactly as specified above. Do NOT put "query", "edit", "delete", "clear", "undo",
+     or "clarify" inside a batch.
+   - If the user describes only ONE action, return that single action directly (no batch).
+
 RULES
 - Return ONLY the JSON object, no prose, no markdown fences.
 - Dates default to today if not stated.
@@ -142,6 +153,7 @@ class SellItems(BaseModel):
     quantity: int
     total_price: float
     sale_date: str
+    shipping_cost: float = 0.0
 
 
 class RipItem(BaseModel):
@@ -207,9 +219,20 @@ class NeedsClarification(BaseModel):
     options: list[str] = []
 
 
+class Batch(BaseModel):
+    """A group of logging actions confirmed and committed together."""
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+    action: Literal["batch"]
+    actions: list  # list of AddInventory | SellItems | RipItem | AddExpense
+
+
+# Action types allowed inside a batch (logging only — no edits/deletes/queries).
+_BATCHABLE = (AddInventory, SellItems, RipItem, AddExpense)
+
+
 ParsedAction = Union[
     AddInventory, SellItems, RipItem, AddExpense,
-    EditEntry, DeleteEntry, ClearInventory, UndoLast, Query, NeedsClarification
+    EditEntry, DeleteEntry, ClearInventory, UndoLast, Query, NeedsClarification, Batch
 ]
 
 _ACTION_MAP = {
@@ -284,6 +307,18 @@ def parse(user_message: str, active_inventory: list[dict]) -> ParsedAction:
     if not isinstance(data, dict):
         return NeedsClarification(action="clarify", reason="Unexpected parser response format.")
 
+    # Batch: validate every sub-action, then return a Batch (or collapse to one).
+    if data.get("action") == "batch":
+        return _build_batch(data, active_names)
+
+    return _build_action(data, active_names)
+
+
+def _build_action(data: dict, active_names) -> ParsedAction:
+    """Validate one action dict into a model, with the sell/rip inventory cross-check."""
+    if not isinstance(data, dict):
+        return NeedsClarification(action="clarify", reason="Couldn't understand that. Try rephrasing.")
+
     action_key = data.get("action", "clarify")
     model_cls = _ACTION_MAP.get(action_key, NeedsClarification)
 
@@ -308,3 +343,33 @@ def parse(user_message: str, active_inventory: list[dict]) -> ParsedAction:
             )
 
     return parsed
+
+
+def _build_batch(data: dict, active_names) -> ParsedAction:
+    """Validate a batch of logging actions into a Batch (or a single action / clarify)."""
+    raw_actions = data.get("actions")
+    if not isinstance(raw_actions, list) or not raw_actions:
+        return NeedsClarification(action="clarify", reason="I couldn't read the list of actions. Try rephrasing.")
+
+    # Items being added in this batch can be sold later in the same batch.
+    names = set(active_names) | {
+        a["item_name"] for a in raw_actions
+        if isinstance(a, dict) and a.get("action") == "add" and a.get("item_name")
+    }
+
+    parsed_actions: list = []
+    for sub in raw_actions:
+        result = _build_action(sub, names)
+        if isinstance(result, NeedsClarification):
+            return result  # surface the first problem; the whole batch waits
+        if not isinstance(result, _BATCHABLE):
+            return NeedsClarification(
+                action="clarify",
+                reason="I can only batch buys, sells, rips, and expenses together. "
+                       "Do edits, deletes, and questions one at a time.",
+            )
+        parsed_actions.append(result)
+
+    if len(parsed_actions) == 1:
+        return parsed_actions[0]
+    return Batch(action="batch", actions=parsed_actions)

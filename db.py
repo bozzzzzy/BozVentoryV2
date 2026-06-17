@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS inventory (
     sale_date       TEXT,
     sale_price      REAL,
     sale_group_id   INTEGER,
+    shipping_cost   REAL NOT NULL DEFAULT 0,
     notes           TEXT,
     deleted_at      TEXT
 );
@@ -69,6 +70,14 @@ def init_db():
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     with get_conn() as conn:
         conn.executescript(SCHEMA)
+        _migrate(conn)
+
+
+def _migrate(conn):
+    """Apply lightweight additive migrations to existing databases."""
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(inventory)").fetchall()}
+    if "shipping_cost" not in cols:
+        conn.execute("ALTER TABLE inventory ADD COLUMN shipping_cost REAL NOT NULL DEFAULT 0")
 
 
 def today_iso() -> str:
@@ -150,13 +159,14 @@ def _commit_sell(action) -> tuple[list[int], int]:
         ids = [r["id"] for r in rows]
         next_group = _next_sale_group_id(conn)
         per_unit = action.total_price / action.quantity
+        ship_per_unit = getattr(action, "shipping_cost", 0.0) / action.quantity
 
         for row_id in ids:
             conn.execute("""
                 UPDATE inventory
-                   SET status='sold', sale_date=?, sale_price=?, sale_group_id=?
+                   SET status='sold', sale_date=?, sale_price=?, sale_group_id=?, shipping_cost=?
                  WHERE id=?
-            """, (action.sale_date, per_unit, next_group, row_id))
+            """, (action.sale_date, per_unit, next_group, ship_per_unit, row_id))
 
     return ids, next_group
 
@@ -368,7 +378,8 @@ def undo_action(last_action_type: str, affected_ids: list[int], prior_state: dic
             for row_id in affected_ids:
                 conn.execute("""
                     UPDATE inventory
-                       SET status='active', sale_date=NULL, sale_price=NULL, sale_group_id=NULL
+                       SET status='active', sale_date=NULL, sale_price=NULL,
+                           sale_group_id=NULL, shipping_cost=0
                      WHERE id=?
                 """, (row_id,))
 
@@ -450,7 +461,7 @@ def get_all_inventory_for_sync() -> list[list]:
     with get_conn() as conn:
         rows = conn.execute("""
             SELECT id, category, item_name, size, purchase_date, purchase_price,
-                   status, sale_date, sale_price, sale_group_id, notes
+                   status, sale_date, sale_price, shipping_cost, sale_group_id, notes
               FROM inventory
              WHERE deleted_at IS NULL
              ORDER BY id DESC
@@ -464,6 +475,7 @@ def get_all_inventory_for_sync() -> list[list]:
             r["status"],
             iso_to_display(r["sale_date"]) if r["sale_date"] else "",
             f'${r["sale_price"]:.2f}' if r["sale_price"] is not None else "",
+            f'${r["shipping_cost"]:.2f}' if r["shipping_cost"] else "",
             r["sale_group_id"] or "",
             r["notes"] or "",
         ])
@@ -610,6 +622,7 @@ def get_profit_summary(period: str | None = None, category: str | None = None) -
         totals = conn.execute(f"""
             SELECT COALESCE(SUM(i.sale_price), 0)     AS revenue,
                    COALESCE(SUM(i.purchase_price), 0)  AS cogs,
+                   COALESCE(SUM(i.shipping_cost), 0)   AS shipping,
                    COUNT(*)                             AS units_sold
               FROM inventory i
              WHERE i.status = 'sold' AND i.deleted_at IS NULL
@@ -620,12 +633,13 @@ def get_profit_summary(period: str | None = None, category: str | None = None) -
             SELECT i.category,
                    COALESCE(SUM(i.sale_price), 0)    AS revenue,
                    COALESCE(SUM(i.purchase_price), 0) AS cogs,
+                   COALESCE(SUM(i.shipping_cost), 0)  AS shipping,
                    COUNT(*)                            AS units_sold
               FROM inventory i
              WHERE i.status = 'sold' AND i.deleted_at IS NULL
                {period_sql} {cat_sql}
              GROUP BY i.category
-             ORDER BY (SUM(i.sale_price) - SUM(i.purchase_price)) DESC
+             ORDER BY (SUM(i.sale_price) - SUM(i.purchase_price) - SUM(i.shipping_cost)) DESC
         """, period_params + cat_params).fetchall()
 
         exp_period_sql, exp_params = _period_clause(period, "e.date")
@@ -637,20 +651,23 @@ def get_profit_summary(period: str | None = None, category: str | None = None) -
 
     revenue = totals["revenue"]
     cogs = totals["cogs"]
+    shipping = totals["shipping"]
     expenses = exp_row["expenses"]
     return {
         "revenue": revenue,
         "cogs": cogs,
-        "gross_profit": revenue - cogs,
+        "shipping": shipping,
+        "gross_profit": revenue - cogs - shipping,
         "expenses": expenses,
-        "net_profit": revenue - cogs - expenses,
+        "net_profit": revenue - cogs - shipping - expenses,
         "units_sold": totals["units_sold"],
         "by_category": [
             {
                 "category": r["category"],
                 "revenue": r["revenue"],
                 "cogs": r["cogs"],
-                "gross_profit": r["revenue"] - r["cogs"],
+                "shipping": r["shipping"],
+                "gross_profit": r["revenue"] - r["cogs"] - r["shipping"],
                 "units_sold": r["units_sold"],
             }
             for r in cats

@@ -265,6 +265,47 @@ def test_format_profit(seeded_db, monkeypatch):
     assert "Net profit" in result
 
 
+# ── Batch logging ─────────────────────────────────────────────────────────────
+
+def test_describe_action_variants():
+    from main import _describe_action
+    from parser import AddInventory, SellItems, AddExpense
+    add = AddInventory(action="add", category="cards", item_name="Pack",
+                       unit_price=5.0, purchase_date="2026-01-01", quantity=3)
+    assert "Add ×3 Pack" in _describe_action(add)
+    sell = SellItems(action="sell", item_name="Pack", quantity=1,
+                     total_price=20.0, sale_date="2026-01-02", shipping_cost=4.0)
+    desc = _describe_action(sell)
+    assert "Sell ×1 Pack" in desc and "shipping" in desc
+    exp = AddExpense(action="expense", amount=15.0, description="sleeves",
+                     category=None, date="2026-01-01")
+    assert "Expense $15.00" in _describe_action(exp)
+
+
+def test_batch_confirmation_summary():
+    from main import build_confirmation_summary
+    from parser import Batch, AddInventory, AddExpense
+    batch = Batch(action="batch", actions=[
+        AddInventory(action="add", category="cards", item_name="Pack",
+                     unit_price=5.0, purchase_date="2026-01-01", quantity=2),
+        AddExpense(action="expense", amount=10.0, description="shipping",
+                   category=None, date="2026-01-01"),
+    ])
+    summary = build_confirmation_summary(batch)
+    assert "About to do 2 things" in summary
+    assert "1. Add ×2 Pack" in summary
+    assert "2. Expense $10.00" in summary
+
+
+def test_sell_confirmation_shows_shipping():
+    from main import build_confirmation_summary
+    from parser import SellItems
+    action = SellItems(action="sell", item_name="Pack", quantity=1,
+                       total_price=50.0, sale_date="2026-01-02", shipping_cost=7.0)
+    summary = build_confirmation_summary(action)
+    assert "Shipping" in summary
+
+
 def test_format_profit_with_period(seeded_db, monkeypatch):
     import db
     monkeypatch.setattr(db, "DB_PATH", seeded_db.DB_PATH)

@@ -14,7 +14,7 @@ import transcribe
 from parser import (
     parse, ParsedAction,
     AddInventory, SellItems, RipItem, AddExpense,
-    EditEntry, DeleteEntry, ClearInventory, UndoLast, Query, NeedsClarification,
+    EditEntry, DeleteEntry, ClearInventory, UndoLast, Query, NeedsClarification, Batch,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -47,7 +47,9 @@ class PendingClarification:
 pending: dict[int, PendingConfirmation] = {}
 pending_clarification: dict[int, PendingClarification] = {}
 query_messages: set[int] = set()
-last_committed: LastAction | None = None
+# A committed action becomes one or more LastAction steps (a batch = several);
+# undo reverses them all in reverse order.
+last_committed: list[LastAction] = []
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -68,7 +70,37 @@ def fmt_date(iso: str) -> str:
         return iso or "unknown date"
 
 
+def _describe_action(action: ParsedAction) -> str:
+    """One-line description of a single logging action, for batch confirmations/results."""
+    if isinstance(action, AddInventory):
+        total = action.unit_price * action.quantity
+        price = (
+            f"{fmt_price(action.unit_price)} ea ({fmt_price(total)} total)"
+            if action.quantity > 1 else fmt_price(action.unit_price)
+        )
+        size = f" (size {action.size})" if action.size else ""
+        return f"Add ×{action.quantity} {action.item_name}{size} — {price}"
+    elif isinstance(action, SellItems):
+        shipping = getattr(action, "shipping_cost", 0.0) or 0.0
+        ship = f", −{fmt_price(shipping)} shipping" if shipping else ""
+        return f"Sell ×{action.quantity} {action.item_name} — {fmt_price(action.total_price)} total{ship}"
+    elif isinstance(action, RipItem):
+        return f"Write off ×{action.quantity} {action.item_name}"
+    elif isinstance(action, AddExpense):
+        cat = f" [{action.category}]" if action.category else ""
+        return f"Expense {fmt_price(action.amount)}{cat} — {action.description}"
+    return "Unknown action"
+
+
 def build_confirmation_summary(action: ParsedAction, prior_state: dict | None = None) -> str:
+    if isinstance(action, Batch):
+        lines = [f"About to do {len(action.actions)} things:"]
+        for i, sub in enumerate(action.actions, 1):
+            lines.append(f"{i}. {_describe_action(sub)}")
+        lines.append("")
+        lines.append(f"React {config.CONFIRM_EMOJI} to do all or {config.CANCEL_EMOJI} to cancel.")
+        return "\n".join(lines)
+
     if isinstance(action, AddInventory):
         size_str = f"Size: {action.size}" if action.size else "Size: (none)"
         total = action.unit_price * action.quantity
@@ -93,11 +125,14 @@ def build_confirmation_summary(action: ParsedAction, prior_state: dict | None = 
             if action.quantity > 1
             else fmt_price(action.total_price)
         )
+        shipping = getattr(action, "shipping_cost", 0.0) or 0.0
+        ship_line = f"\n• Shipping: −{fmt_price(shipping)}" if shipping else ""
         pnl_line = ""
         try:
             fifo = db.get_fifo_preview(action.item_name, action.quantity)
             avg_cost = sum(r["purchase_price"] for r in fifo) / len(fifo)
-            profit_per = per_unit - avg_cost
+            ship_per = shipping / action.quantity
+            profit_per = per_unit - avg_cost - ship_per
             roi_pct = (profit_per / avg_cost * 100) if avg_cost else 0.0
             sign = "+" if profit_per >= 0 else ""
             pnl_line = (
@@ -110,7 +145,7 @@ def build_confirmation_summary(action: ParsedAction, prior_state: dict | None = 
             f"Recording sale:\n"
             f"• {action.quantity}× {action.item_name} (oldest unsold)\n"
             f"• {price_str} on {fmt_date(action.sale_date)}"
-            f"{pnl_line}\n\n"
+            f"{ship_line}{pnl_line}\n\n"
             f"React {config.CONFIRM_EMOJI} to confirm or {config.CANCEL_EMOJI} to cancel."
         )
 
@@ -313,6 +348,8 @@ def format_query_results(action: Query) -> str:
         lines = [f"Profit summary{period_label}{cat_label}:"]
         lines.append(f"  Revenue:       {fmt_price(data['revenue'])}  ({data['units_sold']} units sold)")
         lines.append(f"  COGS:        − {fmt_price(data['cogs'])}")
+        if data.get("shipping"):
+            lines.append(f"  Shipping:    − {fmt_price(data['shipping'])}")
         lines.append(f"  Gross profit:  {fmt_price(data['gross_profit'])}")
         lines.append(f"  Expenses:    − {fmt_price(data['expenses'])}")
         lines.append(f"  Net profit:    {fmt_price(data['net_profit'])}")
@@ -554,28 +591,58 @@ async def on_reaction_add(reaction: discord.Reaction, user: discord.User):
     if emoji == config.CONFIRM_EMOJI:
         try:
             if isinstance(action, UndoLast):
-                if last_committed is None:
+                if not last_committed:
                     await reaction.message.reply("Nothing to undo.")
                     return
-                db.undo_action(last_committed.action_type, last_committed.affected_ids, last_committed.prior_state)
-                notice = f"Undid last action ({last_committed.action_type})."
-                last_committed = None
+                for step in reversed(last_committed):
+                    db.undo_action(step.action_type, step.affected_ids, step.prior_state)
+                n = len(last_committed)
+                label = f"batch of {n}" if n > 1 else last_committed[0].action_type
+                last_committed = []
                 await reaction.message.delete()
-                await channel.send(notice)
+                await channel.send(f"Undid last action ({label}).")
+                try:
+                    sheets.sync()
+                except Exception:
+                    log.exception("Sheets sync failed")
+                    await channel.send("⚠️ Sheets sync failed — check logs. SQLite is up to date.")
             else:
-                prior_stash: dict = {}
-                if confirmation.prior_state:
-                    prior_stash = confirmation.prior_state.copy()
+                # A batch commits several sub-actions; a single action commits one.
+                subs = action.actions if isinstance(action, Batch) else [action]
+                steps: list[LastAction] = []
+                results: list[tuple] = []
+                try:
+                    for sub in subs:
+                        # prior_state (edit/delete/clear) only applies to single, non-batch actions.
+                        prior_stash: dict = {}
+                        if not isinstance(action, Batch) and confirmation.prior_state:
+                            prior_stash = confirmation.prior_state.copy()
+                        ids, sgid = db.commit_action(sub, prior_stash if prior_stash else None)
+                        steps.append(LastAction(
+                            action_type=sub.action,
+                            affected_ids=ids,
+                            sale_group_id=sgid,
+                            prior_state=prior_stash if prior_stash else None,
+                        ))
+                        results.append((sub, ids, sgid))
+                except ValueError as e:
+                    # Roll back anything already committed so the batch is all-or-nothing.
+                    for step in reversed(steps):
+                        db.undo_action(step.action_type, step.affected_ids, step.prior_state)
+                    extra = " Nothing was committed." if isinstance(action, Batch) else ""
+                    await reaction.message.reply(f"{e}{extra}")
+                    return
+                last_committed = steps
 
-                affected_ids, sale_group_id = db.commit_action(action, prior_stash if prior_stash else None)
-                last_committed = LastAction(
-                    action_type=action.action,
-                    affected_ids=affected_ids,
-                    sale_group_id=sale_group_id,
-                    prior_state=prior_stash if prior_stash else None,
-                )
+                if isinstance(action, Batch):
+                    notice_lines = [f"Committed {len(results)} actions:"]
+                    notice_lines += [f"• {_success_message(s, ids, sgid)}" for s, ids, sgid in results]
+                    notice_lines.append('Say "undo" to reverse the whole batch.')
+                    notice = "\n".join(notice_lines)
+                else:
+                    sub, ids, sgid = results[0]
+                    notice = _success_message(sub, ids, sgid)
 
-                notice = _success_message(action, affected_ids, sale_group_id)
                 await reaction.message.delete()
                 await channel.send(notice)
 

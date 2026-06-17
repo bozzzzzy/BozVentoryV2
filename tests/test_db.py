@@ -148,6 +148,46 @@ def test_commit_sell_multi_unit_splits_price(db_mod):
     assert all(r["sale_group_id"] == group for r in rows)
 
 
+def test_commit_sell_stores_per_unit_shipping(db_mod):
+    from parser import SellItems
+    _add_items(db_mod, "Tee", 2, 10.00)
+    action = SellItems(action="sell", item_name="Tee", quantity=2,
+                       total_price=80.00, sale_date="2026-06-01", shipping_cost=12.00)
+    ids, _ = db_mod.commit_action(action)
+    with db_mod.get_conn() as conn:
+        rows = conn.execute("SELECT shipping_cost FROM inventory WHERE id IN (?,?)", ids).fetchall()
+    assert all(r["shipping_cost"] == 6.00 for r in rows)
+
+
+def test_shipping_reduces_profit(db_mod):
+    from parser import SellItems
+    _add_items(db_mod, "Hat", 1, 10.00)
+    db_mod.commit_action(SellItems(action="sell", item_name="Hat", quantity=1,
+                                   total_price=50.00, sale_date="2026-06-01", shipping_cost=8.00))
+    p = db_mod.get_profit_summary()
+    assert p["shipping"] == 8.00
+    assert p["gross_profit"] == 50.00 - 10.00 - 8.00
+    assert p["net_profit"] == 50.00 - 10.00 - 8.00
+
+
+def test_undo_sell_clears_shipping(db_mod):
+    from parser import SellItems
+    add_ids = _add_items(db_mod, "Jacket", 1, 20.00)
+    sell_ids, _ = db_mod.commit_action(SellItems(action="sell", item_name="Jacket", quantity=1,
+                                                 total_price=60.00, sale_date="2026-06-01", shipping_cost=10.00))
+    db_mod.undo_action("sell", sell_ids)
+    with db_mod.get_conn() as conn:
+        row = conn.execute("SELECT status, shipping_cost FROM inventory WHERE id=?", (add_ids[0],)).fetchone()
+    assert row["status"] == "active"
+    assert row["shipping_cost"] == 0
+
+
+def test_migration_adds_shipping_column(db_mod):
+    with db_mod.get_conn() as conn:
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(inventory)").fetchall()}
+    assert "shipping_cost" in cols
+
+
 def test_commit_sell_insufficient_stock_raises(db_mod):
     from parser import SellItems
     _add_items(db_mod, "Rare Card", 1, 50.00)

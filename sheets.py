@@ -15,7 +15,7 @@ SCOPES = [
 ]
 
 INV_HEADERS = ["ID", "Category", "Item Name", "Size", "Purchase Date", "Purchase Price",
-               "Status", "Sale Date", "Sale Price", "Sale Group", "Notes"]
+               "Status", "Sale Date", "Sale Price", "Shipping", "Sale Group", "Notes"]
 EXP_HEADERS = ["ID", "Date", "Category", "Amount", "Description"]
 
 _SHEETS_ID_RE = re.compile(r'^[A-Za-z0-9_-]{25,60}$')
@@ -47,13 +47,18 @@ def _get_client() -> gspread.Client:
 def _ensure_worksheets(spreadsheet: gspread.Spreadsheet):
     titles = [ws.title for ws in spreadsheet.worksheets()]
     if "Inventory" not in titles:
-        ws = spreadsheet.add_worksheet("Inventory", rows=1000, cols=len(INV_HEADERS))
-        ws.freeze(rows=1)
-        ws.update("A1", [INV_HEADERS])
+        inv_ws = spreadsheet.add_worksheet("Inventory", rows=1000, cols=len(INV_HEADERS))
+        inv_ws.freeze(rows=1)
+    else:
+        inv_ws = spreadsheet.worksheet("Inventory")
     if "Expenses" not in titles:
-        ws = spreadsheet.add_worksheet("Expenses", rows=1000, cols=len(EXP_HEADERS))
-        ws.freeze(rows=1)
-        ws.update("A1", [EXP_HEADERS])
+        exp_ws = spreadsheet.add_worksheet("Expenses", rows=1000, cols=len(EXP_HEADERS))
+        exp_ws.freeze(rows=1)
+    else:
+        exp_ws = spreadsheet.worksheet("Expenses")
+    # Always refresh headers so schema additions (e.g. Shipping) stay aligned.
+    inv_ws.update("A1", [INV_HEADERS])
+    exp_ws.update("A1", [EXP_HEADERS])
 
 
 def _overwrite_worksheet(ws: gspread.Worksheet, rows: list[list], col_range: str):
@@ -78,7 +83,7 @@ def sync():
 
     inv_ws = spreadsheet.worksheet("Inventory")
     inv_rows = db.get_all_inventory_for_sync()
-    _overwrite_worksheet(inv_ws, inv_rows, "K")
+    _overwrite_worksheet(inv_ws, inv_rows, "L")
 
     exp_ws = spreadsheet.worksheet("Expenses")
     exp_rows = db.get_all_expenses_for_sync()
