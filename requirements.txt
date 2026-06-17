@@ -1,0 +1,8 @@
+discord.py
+anthropic
+python-dotenv
+gspread
+google-auth
+pydantic>=2
+pytest
+pytest-asyncio
