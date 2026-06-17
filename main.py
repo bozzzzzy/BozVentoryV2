@@ -221,6 +221,27 @@ def format_query_results(action: Query) -> str:
             lines.append(f"#{item['id']} [{item['status']}] {item['item_name']} — {fmt_price(item['purchase_price'])}{sale_str} ({item['purchase_date']})")
         return "```\n" + "\n".join(lines) + "\n```"
 
+    elif qt == "items":
+        category = filters.get("category")
+        items = db.get_active_inventory_summary(category=category)
+        if not items:
+            scope = f" in {category}" if category else ""
+            return f"No active inventory{scope}."
+        cat_label = f" [{category}]" if category else ""
+        lines = [f"Your active inventory{cat_label}:"]
+        current_cat = None
+        for it in items:
+            size_str = f" (size {it['size']})" if it["size"] else ""
+            qty_str = f" ×{it['count']}" if it["count"] > 1 else ""
+            if not category:
+                if it["category"] != current_cat:
+                    current_cat = it["category"]
+                    lines.append(f"{current_cat}:")
+                lines.append(f"  • {it['item_name']}{size_str}{qty_str}")
+            else:
+                lines.append(f"• {it['item_name']}{size_str}{qty_str}")
+        return "```\n" + "\n".join(lines) + "\n```"
+
     elif qt == "by_category":
         items = db.get_unsold_items()
         if not items:

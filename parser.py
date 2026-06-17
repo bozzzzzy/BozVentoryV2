@@ -81,14 +81,17 @@ You must return exactly one of these JSON shapes (see "action" field):
    {{ "action": "undo" }}
 
 8. query — user is asking a read-only question
-   {{ "action": "query", "query_type": "stale" | "unsold" | "recent" | "by_category" | "expenses_sum" | "profit" | "velocity" | "leaderboard" | "cashflow",
+   {{ "action": "query", "query_type": "items" | "stale" | "unsold" | "recent" | "by_category" | "expenses_sum" | "profit" | "velocity" | "leaderboard" | "cashflow",
      "filters": {{ ... }} }}
 
    Filter keys by query_type:
+   - "items"        : "category" (optional) — lists the actual item NAMES currently held.
+                      Use this when the user wants to know WHAT items they have
+                      (e.g. "what do I have", "list my items", "what cards do I have").
    - "stale"        : no filters needed
    - "unsold"       : "category" (optional), "min_days_held" (int, optional)
    - "recent"       : no filters needed
-   - "by_category"  : no filters needed
+   - "by_category"  : no filters needed — only category TOTALS, not item names.
    - "expenses_sum" : "period" (optional)
    - "profit"       : "period" (optional), "category" (optional)
    - "velocity"     : "category" (optional)
@@ -185,7 +188,7 @@ class UndoLast(BaseModel):
 class Query(BaseModel):
     model_config = ConfigDict(extra="forbid")
     action: Literal["query"]
-    query_type: Literal["stale", "unsold", "recent", "by_category", "expenses_sum", "profit", "velocity", "leaderboard", "cashflow"]
+    query_type: Literal["items", "stale", "unsold", "recent", "by_category", "expenses_sum", "profit", "velocity", "leaderboard", "cashflow"]
     filters: dict = {}
 
 

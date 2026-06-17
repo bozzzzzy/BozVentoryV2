@@ -83,15 +83,19 @@ def display_to_iso(display: str) -> str:
     return datetime.strptime(display, DATE_FORMAT_DISPLAY).strftime(DATE_FORMAT_STORAGE)
 
 
-def get_active_inventory_summary() -> list[dict]:
+def get_active_inventory_summary(category: str | None = None) -> list[dict]:
+    sql = """
+        SELECT item_name, category, size, COUNT(*) as count
+          FROM inventory
+         WHERE status = 'active' AND deleted_at IS NULL
+    """
+    params: list = []
+    if category:
+        sql += " AND category = ?"
+        params.append(category)
+    sql += " GROUP BY item_name, category, size ORDER BY category, item_name"
     with get_conn() as conn:
-        rows = conn.execute("""
-            SELECT item_name, category, size, COUNT(*) as count
-              FROM inventory
-             WHERE status = 'active' AND deleted_at IS NULL
-             GROUP BY item_name, category, size
-             ORDER BY item_name
-        """).fetchall()
+        rows = conn.execute(sql, params).fetchall()
     return [dict(r) for r in rows]
 
 

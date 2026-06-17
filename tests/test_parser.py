@@ -184,6 +184,20 @@ def test_parse_add_returns_add_inventory():
     assert result.item_name == "Pack"
 
 
+def test_parse_items_query_returns_query():
+    from parser import Query
+    result = _call_parse({"action": "query", "query_type": "items", "filters": {}})
+    assert isinstance(result, Query)
+    assert result.query_type == "items"
+
+
+def test_parse_items_query_with_category():
+    from parser import Query
+    result = _call_parse({"action": "query", "query_type": "items", "filters": {"category": "cards"}})
+    assert isinstance(result, Query)
+    assert result.filters.get("category") == "cards"
+
+
 def test_parse_clear_returns_clear_inventory():
     from parser import ClearInventory
     result = _call_parse({"action": "clear", "table": "inventory", "category": None})

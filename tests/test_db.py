@@ -415,6 +415,15 @@ def test_get_active_inventory_summary(db_mod):
     assert "Pack A" in names and "Pack B" in names
 
 
+def test_get_active_inventory_summary_category_filter(db_mod):
+    _add_items(db_mod, "Pikachu", 1, 5.00, category="cards")
+    _add_items(db_mod, "Air Force 1", 2, 90.00, category="sneakers")
+    summary = db_mod.get_active_inventory_summary(category="sneakers")
+    assert len(summary) == 1
+    assert summary[0]["item_name"] == "Air Force 1"
+    assert summary[0]["count"] == 2
+
+
 def test_get_unsold_items_category_filter(seeded_db):
     cards = seeded_db.get_unsold_items(category="cards")
     assert all(r["category"] == "cards" for r in cards)

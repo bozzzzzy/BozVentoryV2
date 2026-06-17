@@ -210,6 +210,30 @@ def test_format_by_category(seeded_db, monkeypatch):
     assert "cards" in result and "sneakers" in result
 
 
+def test_format_items_lists_names(seeded_db, monkeypatch):
+    import db
+    monkeypatch.setattr(db, "DB_PATH", seeded_db.DB_PATH)
+    result = _query("items")
+    # The unsold/active items should appear by name, not just category totals.
+    assert "Prismatic Bundle" in result
+    assert "Nike Dunk Low" in result
+
+
+def test_format_items_category_filter(seeded_db, monkeypatch):
+    import db
+    monkeypatch.setattr(db, "DB_PATH", seeded_db.DB_PATH)
+    result = _query("items", {"category": "sneakers"})
+    assert "Nike Dunk Low" in result
+    assert "Prismatic Bundle" not in result
+
+
+def test_format_items_empty(db_mod, monkeypatch):
+    import db
+    monkeypatch.setattr(db, "DB_PATH", db_mod.DB_PATH)
+    result = _query("items")
+    assert "No active inventory" in result
+
+
 def test_format_profit(seeded_db, monkeypatch):
     import db
     monkeypatch.setattr(db, "DB_PATH", seeded_db.DB_PATH)
