@@ -64,8 +64,18 @@ You must return exactly one of these JSON shapes (see "action" field):
      sale_date, sale_price, notes, status  (for inventory)
      OR: date, category, amount, description  (for expenses)
 
-6. delete — user wants to remove an entry
+6. delete — user wants to remove a SINGLE entry
    {{ "action": "delete", "target": <int> | "last", "table": "inventory" | "expenses" }}
+
+6b. clear — user wants to remove ALL entries at once
+   {{ "action": "clear", "table": "inventory" | "expenses", "category": null | "<category>" }}
+   - Use this (NOT "delete") whenever the user wants to wipe everything or everything
+     in one category — e.g. "clear the inventory", "delete all my items",
+     "remove everything", "start fresh", "these are all test products, delete them".
+   - category: ONLY set if the user limits it (e.g. "clear all sneakers" -> "sneakers").
+     Otherwise null (clears the whole table).
+   - This is a single action — never break a "delete everything" request into multiple deletes
+     and never ask the user to confirm how many; just return one "clear" action.
 
 7. undo — user wants to reverse the last committed action
    {{ "action": "undo" }}
@@ -88,12 +98,16 @@ You must return exactly one of these JSON shapes (see "action" field):
    "period" values: "week" | "month" | "quarter" | "year" | "all"
 
 9. clarify — the message is too ambiguous to parse confidently
-   {{ "action": "clarify", "reason": "short human explanation", "options": ["option 1", "option 2"] }}
+   {{ "action": "clarify", "reason": "short message TO the user", "options": ["option 1", "option 2"] }}
+   - "reason" must address the user directly in the second person ("you"), like a chat reply.
+     CORRECT: "Which item did you mean?"  WRONG: "User wants to sell an item but..."
+   - Never narrate about "the user" in the third person, and never describe your own reasoning.
 
 RULES
 - Return ONLY the JSON object, no prose, no markdown fences.
 - Dates default to today if not stated.
 - For sells/rips/edits, if multiple inventory items could match, return "clarify".
+- To wipe everything (or a whole category), return ONE "clear" action — do not use "delete" or "clarify".
 - If the message doesn't match any action, return "clarify"."""
 
 
@@ -156,6 +170,13 @@ class DeleteEntry(BaseModel):
     table: Literal["inventory", "expenses"] = "inventory"
 
 
+class ClearInventory(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    action: Literal["clear"]
+    table: Literal["inventory", "expenses"] = "inventory"
+    category: str | None = None
+
+
 class UndoLast(BaseModel):
     model_config = ConfigDict(extra="forbid")
     action: Literal["undo"]
@@ -177,7 +198,7 @@ class NeedsClarification(BaseModel):
 
 ParsedAction = Union[
     AddInventory, SellItems, RipItem, AddExpense,
-    EditEntry, DeleteEntry, UndoLast, Query, NeedsClarification
+    EditEntry, DeleteEntry, ClearInventory, UndoLast, Query, NeedsClarification
 ]
 
 _ACTION_MAP = {
@@ -187,6 +208,7 @@ _ACTION_MAP = {
     "expense": AddExpense,
     "edit": EditEntry,
     "delete": DeleteEntry,
+    "clear": ClearInventory,
     "undo": UndoLast,
     "query": Query,
     "clarify": NeedsClarification,

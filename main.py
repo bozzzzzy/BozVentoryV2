@@ -13,7 +13,7 @@ import digest
 from parser import (
     parse, ParsedAction,
     AddInventory, SellItems, RipItem, AddExpense,
-    EditEntry, DeleteEntry, UndoLast, Query, NeedsClarification,
+    EditEntry, DeleteEntry, ClearInventory, UndoLast, Query, NeedsClarification,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -152,6 +152,22 @@ def build_confirmation_summary(action: ParsedAction, prior_state: dict | None = 
         target_str = "last entry" if action.target == "last" else f"entry #{action.target}"
         return (
             f"Deleting {target_str} from {action.table}.\n\n"
+            f"React {config.CONFIRM_EMOJI} to confirm or {config.CANCEL_EMOJI} to cancel."
+        )
+
+    elif isinstance(action, ClearInventory):
+        rows = db.get_clear_preview(action.table, action.category)
+        count = len(rows)
+        scope = f" {action.category}" if action.category else ""
+        preview = "\n".join(f"• {r['item_name']}" for r in rows[:10])
+        if count > 10:
+            preview += f"\n…and {count - 10} more"
+        if count == 0:
+            return f"Nothing to clear — no active{scope} {action.table}."
+        return (
+            f"⚠️ Clearing ALL {count}{scope} {action.table} {'entry' if count == 1 else 'entries'}:\n"
+            f"{preview}\n\n"
+            f"This removes everything listed. You can undo it right after.\n"
             f"React {config.CONFIRM_EMOJI} to confirm or {config.CANCEL_EMOJI} to cancel."
         )
 
@@ -399,6 +415,8 @@ async def on_message(message: discord.Message):
             }
     elif isinstance(action, DeleteEntry):
         prior_state = db.record_delete_table(action)
+    elif isinstance(action, ClearInventory):
+        prior_state = {"table": action.table}
 
     try:
         summary = build_confirmation_summary(action, prior_state if prior_state else None)
@@ -522,6 +540,11 @@ def _success_message(action: ParsedAction, affected_ids: list[int], sale_group_i
 
     elif isinstance(action, DeleteEntry):
         return f"Deleted entry #{affected_ids[0]}."
+
+    elif isinstance(action, ClearInventory):
+        scope = f" {action.category}" if action.category else ""
+        n = len(affected_ids)
+        return f"Cleared {n}{scope} {action.table} {'entry' if n == 1 else 'entries'}. Say \"undo\" to restore."
 
     return "Done."
 

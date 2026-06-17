@@ -111,6 +111,8 @@ def commit_action(action, prior_state_stash: dict | None = None) -> tuple[list[i
         return _commit_edit(action, prior_state_stash), None
     elif a == "delete":
         return _commit_delete(action), None
+    elif a == "clear":
+        return _commit_clear(action), None
     elif a == "undo":
         raise ValueError("Undo is handled in main.py, not commit_action")
     else:
@@ -268,6 +270,54 @@ def _commit_delete(action) -> list[int]:
     return [target_id]
 
 
+def _commit_clear(action) -> list[int]:
+    """Soft-delete every active row in the table (optionally filtered by category)."""
+    table = action.table
+    _validate_table(table)
+    category = getattr(action, "category", None)
+
+    with get_conn() as conn:
+        base = (
+            "SELECT id FROM inventory WHERE deleted_at IS NULL"
+            if table == "inventory" else
+            "SELECT id FROM expenses WHERE deleted_at IS NULL"
+        )
+        params: list = []
+        if category:
+            base += " AND category = ?"
+            params.append(category)
+        ids = [r["id"] for r in conn.execute(base, params).fetchall()]
+
+        if not ids:
+            where = f" in category '{category}'" if category else ""
+            raise ValueError(f"Nothing to clear — no active {table}{where}.")
+
+        stamp = today_iso()
+        if table == "inventory":
+            conn.executemany("UPDATE inventory SET deleted_at=? WHERE id=?", [(stamp, i) for i in ids])
+        else:
+            conn.executemany("UPDATE expenses SET deleted_at=? WHERE id=?", [(stamp, i) for i in ids])
+
+    return ids
+
+
+def get_clear_preview(table: str, category: str | None = None) -> list[dict]:
+    """Return the rows a clear action would remove, for the confirmation message."""
+    _validate_table(table)
+    base = (
+        "SELECT id, item_name, category FROM inventory WHERE deleted_at IS NULL"
+        if table == "inventory" else
+        "SELECT id, description AS item_name, category FROM expenses WHERE deleted_at IS NULL"
+    )
+    params: list = []
+    if category:
+        base += " AND category = ?"
+        params.append(category)
+    base += " ORDER BY id"
+    with get_conn() as conn:
+        return [dict(r) for r in conn.execute(base, params).fetchall()]
+
+
 def undo_action(last_action_type: str, affected_ids: list[int], prior_state: dict | None = None):
     """Reverse the last committed action."""
     with get_conn() as conn:
@@ -300,8 +350,8 @@ def undo_action(last_action_type: str, affected_ids: list[int], prior_state: dic
             else:
                 conn.execute(f"UPDATE expenses SET {field}=? WHERE id=?", (old_value, row_id))
 
-        elif last_action_type == "delete" and prior_state:
-            # Use the table recorded at delete time to restore only the correct row.
+        elif last_action_type in ("delete", "clear") and prior_state:
+            # Use the table recorded at delete time to restore only the correct rows.
             table = prior_state.get("table", "inventory")
             _validate_table(table)
             for row_id in affected_ids:

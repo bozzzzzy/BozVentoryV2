@@ -298,6 +298,51 @@ def test_deleted_rows_excluded_from_active_summary(db_mod):
     assert all(s["item_name"] != "Ghost Card" for s in summary)
 
 
+# ── Clear (bulk delete) ─────────────────────────────────────────────────────────
+
+def test_commit_clear_removes_all_active(db_mod):
+    from parser import ClearInventory
+    _add_items(db_mod, "Card A", 1, 5.00)
+    _add_items(db_mod, "Card B", 2, 6.00)
+    ids, group = db_mod.commit_action(ClearInventory(action="clear", table="inventory"))
+    assert len(ids) == 3
+    assert group is None
+    assert db_mod.get_active_inventory_summary() == []
+
+
+def test_commit_clear_by_category(db_mod):
+    from parser import ClearInventory
+    _add_items(db_mod, "Pikachu", 1, 5.00, category="cards")
+    _add_items(db_mod, "Air Force 1", 1, 90.00, category="sneakers")
+    ids, _ = db_mod.commit_action(ClearInventory(action="clear", table="inventory", category="cards"))
+    assert len(ids) == 1
+    remaining = db_mod.get_active_inventory_summary()
+    assert len(remaining) == 1
+    assert remaining[0]["item_name"] == "Air Force 1"
+
+
+def test_commit_clear_empty_raises(db_mod):
+    from parser import ClearInventory
+    with pytest.raises(ValueError, match="Nothing to clear"):
+        db_mod.commit_action(ClearInventory(action="clear", table="inventory"))
+
+
+def test_undo_clear_restores_all(db_mod):
+    from parser import ClearInventory
+    _add_items(db_mod, "Card A", 1, 5.00)
+    _add_items(db_mod, "Card B", 2, 6.00)
+    ids, _ = db_mod.commit_action(ClearInventory(action="clear", table="inventory"))
+    db_mod.undo_action("clear", ids, {"table": "inventory"})
+    assert len(db_mod.get_active_inventory_summary()) == 2
+
+
+def test_get_clear_preview_lists_rows(db_mod):
+    _add_items(db_mod, "Preview Card", 2, 5.00)
+    preview = db_mod.get_clear_preview("inventory")
+    assert len(preview) == 2
+    assert all(p["item_name"] == "Preview Card" for p in preview)
+
+
 # ── Undo ───────────────────────────────────────────────────────────────────────
 
 def test_undo_add(db_mod):

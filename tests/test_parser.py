@@ -184,6 +184,28 @@ def test_parse_add_returns_add_inventory():
     assert result.item_name == "Pack"
 
 
+def test_parse_clear_returns_clear_inventory():
+    from parser import ClearInventory
+    result = _call_parse({"action": "clear", "table": "inventory", "category": None})
+    assert isinstance(result, ClearInventory)
+    assert result.table == "inventory"
+    assert result.category is None
+
+
+def test_parse_clear_with_category():
+    from parser import ClearInventory
+    result = _call_parse({"action": "clear", "table": "inventory", "category": "sneakers"})
+    assert isinstance(result, ClearInventory)
+    assert result.category == "sneakers"
+
+
+def test_parse_clear_defaults_table_to_inventory():
+    from parser import ClearInventory
+    result = _call_parse({"action": "clear"})
+    assert isinstance(result, ClearInventory)
+    assert result.table == "inventory"
+
+
 def test_parse_sell_valid_item_returns_sell():
     from parser import SellItems
     result = _call_parse(
