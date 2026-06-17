@@ -10,6 +10,7 @@ import config
 import db
 import sheets
 import digest
+import transcribe
 from parser import (
     parse, ParsedAction,
     AddInventory, SellItems, RipItem, AddExpense,
@@ -341,10 +342,34 @@ async def on_message(message: discord.Message):
     if message.channel.id != config.DISCORD_CHANNEL_ID:
         return
 
+    # Voice memo: transcribe any audio attachment into text, then parse as usual.
+    audio = next(
+        (
+            a for a in message.attachments
+            if (a.content_type or "").startswith("audio/")
+            or a.filename.lower().endswith(transcribe.AUDIO_EXTENSIONS)
+        ),
+        None,
+    )
+    transcript: str | None = None
+    if audio:
+        try:
+            audio_bytes = await audio.read()
+            transcript = transcribe.transcribe(audio_bytes, audio.filename)
+        except Exception:
+            log.exception("Transcription error")
+            await message.reply("Couldn't transcribe that voice memo. Try again, or type it out.")
+            return
+        if not transcript:
+            await message.reply("That voice memo came through empty — nothing to log.")
+            return
+        # Echo back what was heard so a mis-transcription is caught before parsing.
+        await message.reply(f'🎤 Heard: "{transcript}"')
+
     # Resolve a pending clarification if the user replied with a number.
-    user_message = message.content
+    user_message = transcript or message.content
     pc = pending_clarification.pop(message.author.id, None)
-    if pc:
+    if pc and not transcript:
         stripped = message.content.strip()
         if stripped.isdigit():
             choice = int(stripped)

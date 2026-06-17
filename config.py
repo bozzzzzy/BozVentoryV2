@@ -29,6 +29,7 @@ DISCORD_USER_ID = _require_int("DISCORD_USER_ID")
 DISCORD_CHANNEL_ID = _require_int("DISCORD_CHANNEL_ID")
 GOOGLE_SHEETS_ID = _require("GOOGLE_SHEETS_ID")
 GOOGLE_SERVICE_ACCOUNT_PATH = os.environ.get("GOOGLE_SERVICE_ACCOUNT_PATH", "./creds.json")
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")  # optional; enables voice-memo transcription
 DIGEST_HOUR = int(os.environ.get("DIGEST_HOUR", "9"))
 STALE_DAYS = int(os.environ.get("STALE_DAYS", "30"))
 CONFIRMATION_TIMEOUT_MINUTES = int(os.environ.get("CONFIRMATION_TIMEOUT_MINUTES", "60"))
