@@ -81,12 +81,20 @@ You must return exactly one of these JSON shapes (see "action" field):
    {{ "action": "undo" }}
 
 8. query — user is asking a read-only question
-   {{ "action": "query", "query_type": "items" | "stale" | "unsold" | "recent" | "by_category" | "expenses_sum" | "profit" | "velocity" | "leaderboard" | "cashflow",
+   {{ "action": "query", "query_type": "find" | "items" | "stale" | "unsold" | "recent" | "by_category" | "expenses_sum" | "profit" | "velocity" | "leaderboard" | "cashflow",
      "filters": {{ ... }} }}
 
    Filter keys by query_type:
+   - "find"         : "text" (search term / item name, optional), "category" (optional),
+                      "size" (optional), "min_price" (number, optional), "max_price" (number, optional).
+                      Use this to LOOK UP or SEARCH for specific items, or to filter by attributes —
+                      e.g. "find charizard" -> text="charizard"; "do I have any dunks" -> text="dunk";
+                      "size 10 sneakers" -> category="sneakers", size="10";
+                      "cards under $20" -> category="cards", max_price=20;
+                      "items between $50 and $100" -> min_price=50, max_price=100.
+                      "text" matches part of the item name (no need for an exact match).
    - "items"        : "category" (optional) — lists the actual item NAMES currently held.
-                      Use this when the user wants to know WHAT items they have
+                      Use this when the user wants to know WHAT they have generally
                       (e.g. "what do I have", "list my items", "what cards do I have").
    - "stale"        : no filters needed
    - "unsold"       : "category" (optional), "min_days_held" (int, optional)
@@ -188,7 +196,7 @@ class UndoLast(BaseModel):
 class Query(BaseModel):
     model_config = ConfigDict(extra="forbid")
     action: Literal["query"]
-    query_type: Literal["items", "stale", "unsold", "recent", "by_category", "expenses_sum", "profit", "velocity", "leaderboard", "cashflow"]
+    query_type: Literal["find", "items", "stale", "unsold", "recent", "by_category", "expenses_sum", "profit", "velocity", "leaderboard", "cashflow"]
     filters: dict = {}
 
 

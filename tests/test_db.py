@@ -424,6 +424,49 @@ def test_get_active_inventory_summary_category_filter(db_mod):
     assert summary[0]["count"] == 2
 
 
+def test_get_matching_items_by_text(seeded_db):
+    rows = seeded_db.get_matching_items(text="dunk")
+    assert len(rows) == 1
+    assert rows[0]["item_name"] == "Nike Dunk Low"
+    assert "id" in rows[0]
+
+
+def test_get_matching_items_text_is_case_insensitive(seeded_db):
+    assert len(seeded_db.get_matching_items(text="PRISMATIC")) == 1
+
+
+def test_get_matching_items_by_category_and_size(db_mod):
+    _add_items(db_mod, "Air Max 90", 1, 100.0, category="sneakers")
+    with db_mod.get_conn() as conn:
+        conn.execute("UPDATE inventory SET size='10' WHERE item_name='Air Max 90'")
+    _add_items(db_mod, "Dunk", 1, 90.0, category="sneakers")
+    rows = db_mod.get_matching_items(category="sneakers", size="10")
+    assert len(rows) == 1
+    assert rows[0]["item_name"] == "Air Max 90"
+
+
+def test_get_matching_items_price_range(db_mod):
+    _add_items(db_mod, "Cheap", 1, 5.0, category="cards")
+    _add_items(db_mod, "Mid", 1, 50.0, category="cards")
+    _add_items(db_mod, "Pricey", 1, 500.0, category="cards")
+    rows = db_mod.get_matching_items(min_price=10, max_price=100)
+    assert {r["item_name"] for r in rows} == {"Mid"}
+
+
+def test_get_matching_items_excludes_sold_and_deleted(db_mod):
+    from parser import SellItems, DeleteEntry
+    _add_items(db_mod, "SoldCard", 1, 5.0)
+    dead_ids = _add_items(db_mod, "DeadCard", 1, 5.0)
+    _add_items(db_mod, "KeepCard", 1, 5.0)
+    db_mod.commit_action(SellItems(action="sell", item_name="SoldCard", quantity=1,
+                                   total_price=10.0, sale_date="2026-02-01"))
+    db_mod.commit_action(DeleteEntry(action="delete", target=dead_ids[0], table="inventory"))
+    names = [r["item_name"] for r in db_mod.get_matching_items(text="card")]
+    assert "KeepCard" in names
+    assert "SoldCard" not in names
+    assert "DeadCard" not in names
+
+
 def test_get_unsold_items_category_filter(seeded_db):
     cards = seeded_db.get_unsold_items(category="cards")
     assert all(r["category"] == "cards" for r in cards)

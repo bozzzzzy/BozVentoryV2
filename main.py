@@ -221,6 +221,41 @@ def format_query_results(action: Query) -> str:
             lines.append(f"#{item['id']} [{item['status']}] {item['item_name']} — {fmt_price(item['purchase_price'])}{sale_str} ({item['purchase_date']})")
         return "```\n" + "\n".join(lines) + "\n```"
 
+    elif qt == "find":
+        text = filters.get("text") or filters.get("name") or filters.get("query")
+        category = filters.get("category")
+        size = filters.get("size")
+        min_price = filters.get("min_price")
+        max_price = filters.get("max_price")
+        items = db.get_matching_items(
+            text=text, category=category, size=size,
+            min_price=min_price, max_price=max_price,
+        )
+        crit = []
+        if text:
+            crit.append(f"'{text}'")
+        if category:
+            crit.append(f"category {category}")
+        if size is not None:
+            crit.append(f"size {size}")
+        if min_price is not None:
+            crit.append(f"≥ {fmt_price(float(min_price))}")
+        if max_price is not None:
+            crit.append(f"≤ {fmt_price(float(max_price))}")
+        crit_str = (" for " + ", ".join(crit)) if crit else ""
+        if not items:
+            return f"No active items found{crit_str}."
+        lines = [f"Found {len(items)} active item{'s' if len(items) != 1 else ''}{crit_str}:"]
+        for it in items[:25]:
+            size_s = f" (size {it['size']})" if it["size"] else ""
+            lines.append(
+                f"#{it['id']} {it['item_name']}{size_s} [{it['category']}] — "
+                f"{fmt_price(it['purchase_price'])} on {fmt_date(it['purchase_date'])} ({it['days_held']}d)"
+            )
+        if len(items) > 25:
+            lines.append(f"...and {len(items) - 25} more — narrow your search or see the sheet")
+        return "```\n" + "\n".join(lines) + "\n```"
+
     elif qt == "items":
         category = filters.get("category")
         items = db.get_active_inventory_summary(category=category)

@@ -184,6 +184,22 @@ def test_parse_add_returns_add_inventory():
     assert result.item_name == "Pack"
 
 
+def test_parse_find_query_text():
+    from parser import Query
+    result = _call_parse({"action": "query", "query_type": "find", "filters": {"text": "charizard"}})
+    assert isinstance(result, Query)
+    assert result.query_type == "find"
+    assert result.filters.get("text") == "charizard"
+
+
+def test_parse_find_query_price_range():
+    from parser import Query
+    result = _call_parse({"action": "query", "query_type": "find",
+                          "filters": {"category": "cards", "max_price": 20}})
+    assert isinstance(result, Query)
+    assert result.filters.get("max_price") == 20
+
+
 def test_parse_items_query_returns_query():
     from parser import Query
     result = _call_parse({"action": "query", "query_type": "items", "filters": {}})

@@ -210,6 +210,28 @@ def test_format_by_category(seeded_db, monkeypatch):
     assert "cards" in result and "sneakers" in result
 
 
+def test_format_find_by_text(seeded_db, monkeypatch):
+    import db
+    monkeypatch.setattr(db, "DB_PATH", seeded_db.DB_PATH)
+    result = _query("find", {"text": "dunk"})
+    assert "Nike Dunk Low" in result
+    assert "#" in result  # includes entry IDs
+
+
+def test_format_find_price_range(seeded_db, monkeypatch):
+    import db
+    monkeypatch.setattr(db, "DB_PATH", seeded_db.DB_PATH)
+    result = _query("find", {"category": "cards", "max_price": 30})
+    assert "Prismatic Bundle" in result
+
+
+def test_format_find_no_match(seeded_db, monkeypatch):
+    import db
+    monkeypatch.setattr(db, "DB_PATH", seeded_db.DB_PATH)
+    result = _query("find", {"text": "nonexistent-xyz"})
+    assert "No active items found" in result
+
+
 def test_format_items_lists_names(seeded_db, monkeypatch):
     import db
     monkeypatch.setattr(db, "DB_PATH", seeded_db.DB_PATH)

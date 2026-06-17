@@ -305,6 +305,41 @@ def _commit_clear(action) -> list[int]:
     return ids
 
 
+def get_matching_items(
+    text: str | None = None,
+    category: str | None = None,
+    size: str | None = None,
+    min_price: float | None = None,
+    max_price: float | None = None,
+) -> list[dict]:
+    """Search ACTIVE inventory by name substring and/or attributes. Returns rows with IDs."""
+    sql = """
+        SELECT id, category, item_name, size, purchase_price, purchase_date,
+               CAST(julianday('now') - julianday(purchase_date) AS INTEGER) AS days_held
+          FROM inventory
+         WHERE status = 'active' AND deleted_at IS NULL
+    """
+    params: list = []
+    if text:
+        sql += " AND LOWER(item_name) LIKE ?"
+        params.append(f"%{text.lower()}%")
+    if category:
+        sql += " AND category = ?"
+        params.append(category)
+    if size:
+        sql += " AND size = ?"
+        params.append(str(size))
+    if min_price is not None:
+        sql += " AND purchase_price >= ?"
+        params.append(float(min_price))
+    if max_price is not None:
+        sql += " AND purchase_price <= ?"
+        params.append(float(max_price))
+    sql += " ORDER BY item_name, id"
+    with get_conn() as conn:
+        return [dict(r) for r in conn.execute(sql, params).fetchall()]
+
+
 def get_clear_preview(table: str, category: str | None = None) -> list[dict]:
     """Return the rows a clear action would remove, for the confirmation message."""
     _validate_table(table)
